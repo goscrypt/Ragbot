@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Offline Generative Document QA (Auto Model)</title>
+  <title>Offline Generative Document QA (Fixed Remote Loading)</title>
   <style>
     body { font-family: sans-serif; margin: 2em; }
     #chatLog { border: 1px solid #ccc; padding: 1em; height: 320px; overflow-y: auto; margin-bottom: 1em; white-space: pre-wrap; }
@@ -14,7 +14,7 @@
 </head>
 <body>
   <h2>Offline Generative Document QA</h2>
-  <p>Upload a .txt file or use the default demo doc. All processing happens in your browser.</p>
+  <p>Upload a .txt file or use the default demo doc. Models are fetched from Hugging Face on first use, then cached locally in your browser.</p>
   <div id="warning"></div>
   <input type="file" id="fileInput" accept=".txt"><br><br>
   <div id="fileInfo"></div>
@@ -24,7 +24,11 @@
   <button id="sendBtn" disabled>Send</button>
 
   <script type="module">
-    import { pipeline } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.16.1/dist/transformers.min.js';
+    import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.16.1/dist/transformers.min.js';
+
+    // --- Ensure we don't try local paths ---
+    env.allowLocalModels = false;  // force remote Hugging Face CDN
+    env.allowRemoteModels = true;  // always pull from hub if needed
 
     // --- Default Demo Document ---
     const defaultDoc = `
@@ -75,7 +79,7 @@ Training vs Inference
     const isFileProtocol = window.location.protocol === 'file:';
     const generatorModel = isFileProtocol
       ? "Xenova/LaMini-Flan-T5-77M"   // fallback small model
-      : "Xenova/LaMini-Flan-T5-248M"; // better model online
+      : "Xenova/LaMini-Flan-T5-248M"; // better model when hosted
 
     if (isFileProtocol) {
       warning.style.display = "block";
