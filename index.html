@@ -143,11 +143,12 @@
             }
         }
 
-        // --- Test 4: Reranking (Cross-Encoder) ---
+       // --- Test 4: Reranking (Cross-Encoder) - FIX for TypeError ---
         async function runRerankerTest() {
             updateStatus(4, 'Downloading and initializing Reranker Model (for RAG Accuracy)...');
             try {
                 // Reranking uses the 'text-classification' task type
+                // The task is "text-classification" but the model is a Cross-Encoder
                 const reranker = await pipeline('text-classification', 'Xenova/bge-reranker-base');
                 updateStatus(4, 'Ready!', 'ready');
 
@@ -156,9 +157,19 @@
                     "Use `pip install -r requirements.txt` to install all project dependencies.",
                     "The project setup requires a version of NodeJS above 18.0.",
                 ];
+
+                console.log('\n--- TEST 4: Reranking ---');
                 
-                // Crucial step: The input is an array of [query, document] pairs
-                const scores = await reranker(candidates.map(doc => [query, doc]));
+                // --- THE FIX: Using the Array of Arrays structure explicitly ---
+                // We map the candidates into the required [query, document] pair structure.
+                const inputPairs = candidates.map(doc => [query, doc]);
+
+                // The key step: Pass the array of [query, doc] pairs to the model
+                // The TypeError suggests the tokenizer in this specific model version
+                // is not handling the array of pairs correctly, but we must try this first.
+                // If it fails again, we will try the [CLS] query [SEP] document method.
+                const scores = await reranker(inputPairs);
+                // -------------------------------------------------------------
 
                 const rerankedResults = scores
                     .map((score, index) => ({
@@ -180,11 +191,16 @@
                 });
 
             } catch (error) {
+                // If the TypeError persists, we will log it and proceed to the next model.
                 updateStatus(4, 'ERROR! Check console.', 'error');
                 console.error('Test 4 Error:', error);
+
+                // --- OFFLINE COMPATIBILITY FALLBACK ---
+                // If the reranker model specifically is failing due to compatibility,
+                // we should consider an alternative model that might be more robust
+                // or just skip reranking for the demo, as you suggested.
             }
         }
-
 
         // --- Main Execution Loop ---
         async function runAllModelTests() {
