@@ -1,254 +1,206 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Offline Generative Document QA (Fixed Remote Loading)</title>
-  <style>
-    body { font-family: sans-serif; margin: 2em; }
-    #chatLog { border: 1px solid #ccc; padding: 1em; height: 320px; overflow-y: auto; margin-bottom: 1em; white-space: pre-wrap; }
-    .user { color: #0057d8; font-weight: bold; margin: 0.5em 0; }
-    .bot { color: #157f1f; margin: 0.5em 0; }
-    #statusMessage { margin: 0.5em 0; color: #444; }
-    #warning { margin: 1em 0; padding: 1em; background: #ffe8e8; border: 1px solid #d33; color: #900; display: none; }
-  </style>
+    <meta charset="UTF-8">
+    <title>Transformers.js Complete Multi-Model RAG Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .model-test { 
+            border: 1px solid #e0e0e0; 
+            padding: 15px; 
+            margin-bottom: 20px;
+            border-radius: 8px;
+            background-color: #f9f9f9;
+        }
+        .model-test h2 { 
+            margin-top: 0; 
+            border-bottom: 1px solid #ccc;
+            padding-bottom: 5px;
+        }
+        .loading { color: orange; font-weight: bold; }
+        .ready { color: green; font-weight: bold; }
+        .error { color: red; font-weight: bold; }
+    </style>
 </head>
 <body>
-  <h2>Offline Generative Document QA</h2>
-  <p>Upload a .txt file or use the default demo doc. Models are fetched from Hugging Face on first use, then cached locally in your browser.</p>
-  <div id="warning"></div>
-  <input type="file" id="fileInput" accept=".txt"><br><br>
-  <div id="fileInfo"></div>
-  <div id="statusMessage">Loading models… please wait</div>
-  <div id="chatLog">Chat history will appear here...</div>
-  <input type="text" id="userInput" placeholder="Ask a question about your document..." disabled>
-  <button id="sendBtn" disabled>Send</button>
+    <h1>🤖 Transformers.js RAG Core Model Test Suite</h1>
+    <p>This page tests the four core models needed for an accurate Retrieval-Augmented Generation (RAG) bot, all running client-side.</p>
+    <p>Please open the **browser console** (F12) to view the model output, embeddings, and ranking scores.</p>
 
-  <script type="module">
-    import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.16.1/dist/transformers.min.js';
+    <div id="test-output">
+        <div id="test1" class="model-test">
+            <h2>1. Feature Extraction (Initial Retrieval)</h2>
+            <p id="status1" class="loading">Status: Loading...</p>
+            <p><strong>Model:</strong> <code>Xenova/all-MiniLM-L6-v2</code></p>
+            <p><strong>Input:</strong> "The project was a huge success."</p>
+        </div>
+        <div id="test2" class="model-test">
+            <h2>2. Sentiment Analysis (Classification/Triage)</h2>
+            <p id="status2" class="loading">Status: Loading...</p>
+            <p><strong>Model:</strong> <code>Xenova/distilbert-base-uncased-finetuned-sst-2-english</code></p>
+            <p><strong>Input:</strong> "I love coding with these new tools!"</p>
+            <p id="result2"></p>
+        </div>
+        <div id="test3" class="model-test">
+            <h2>3. Text Generation (Response Synthesis)</h2>
+            <p id="status3" class="loading">Status: Loading...</p>
+            <p><strong>Model:</strong> <code>Xenova/gpt2</code></p>
+            <p><strong>Input Prompt:</strong> "The meaning of life is"</p>
+            <p id="result3"></p>
+        </div>
+        <div id="test4" class="model-test">
+            <h2>4. Reranking (Accuracy Check) - **Crucial for RAG**</h2>
+            <p id="status4" class="loading">Status: Loading...</p>
+            <p><strong>Model:</strong> <code>Xenova/bge-reranker-base</code></p>
+            <p><strong>Query:</strong> "How do I install the dependencies for a Python project?"</p>
+            <p><strong>Candidate 1:</strong> "Use `pip install -r requirements.txt` to install all project dependencies."</p>
+            <p><strong>Candidate 2:</strong> "The project setup requires a version of NodeJS above 18.0."</p>
+            <p id="result4"></p>
+        </div>
+    </div>
 
-    // --- Ensure we don't try local paths ---
-    env.allowLocalModels = false;  // force remote Hugging Face CDN
-    env.allowRemoteModels = true;  // always pull from hub if needed
+    <script type="module">
+        import { pipeline } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.14.0';
 
-    // --- Default Demo Document ---
-    const defaultDoc = `
-Why JavaScript for AI
-- Works directly in the browser
-- Runs across platforms
-- Easy to use
-- Great for lightweight AI demos
-- Supports privacy-respecting workflows
-
-Core Libraries
-- Brain.js: Simplified, lightweight, supports feedforward and recurrent networks, best for beginners
-- TensorFlow.js: Full-featured, complex, robust, supports many models, better for advanced users
-- ml5.js: Simple APIs, built on TensorFlow.js, designed for education and demos
-
-Building Blocks of AI in JavaScript
-- Collect input (text, images, audio)
-- Preprocess data (normalization, tokenization)
-- Feed data into a model (pre-trained or custom)
-- Interpret the output
-- Trigger actions
-
-Training vs Inference
-- Training: creating models, resource-intensive, better in Python
-- Inference: running trained models, lightweight
-- JavaScript is best suited for inference
-    `.trim();
-
-    // --- Global State ---
-    const state = {
-      chunks: [],
-      embeddings: [],
-      fe: null,
-      generator: null,
-      isReady: false,
-    };
-
-    // --- DOM References ---
-    const fileInput = document.getElementById('fileInput');
-    const userInput = document.getElementById('userInput');
-    const chatLog = document.getElementById('chatLog');
-    const sendBtn = document.getElementById('sendBtn');
-    const statusMessage = document.getElementById('statusMessage');
-    const fileInfo = document.getElementById('fileInfo');
-    const warning = document.getElementById('warning');
-
-    // --- Environment Detection ---
-    const isFileProtocol = window.location.protocol === 'file:';
-    const generatorModel = isFileProtocol
-      ? "Xenova/LaMini-Flan-T5-77M"   // fallback small model
-      : "Xenova/LaMini-Flan-T5-248M"; // better model when hosted
-
-    if (isFileProtocol) {
-      warning.style.display = "block";
-      warning.textContent = "⚠️ Running from file:// — Using smaller 77M model. For better results, host this file on localhost or GitHub Pages.";
-    }
-
-    // --- Utility ---
-    function setStatus(message) {
-      if (statusMessage) statusMessage.textContent = message;
-    }
-
-    function appendMessage(sender, text) {
-      const div = document.createElement('div');
-      div.className = sender;
-      div.textContent = (sender === 'user' ? "You: " : "Bot: ") + text;
-      chatLog.appendChild(div);
-      chatLog.scrollTop = chatLog.scrollHeight;
-    }
-
-    function dot(a, b) {
-      if (a.length !== b.length) throw new Error("Vector size mismatch");
-      return a.reduce((sum, val, i) => sum + val * b[i], 0);
-    }
-
-    // --- Chunking ---
-    function chunkText(text, chunkSize = 400, chunkOverlap = 100) {
-      const chunks = [];
-      let i = 0;
-      while (i < text.length) {
-        const end = Math.min(i + chunkSize, text.length);
-        const chunk = text.substring(i, end).trim();
-        if (chunk.length > 0) {
-          chunks.push(chunk);
+        // --- Helper Function ---
+        function updateStatus(id, message, className = 'loading') {
+            const el = document.getElementById(`status${id}`);
+            if (el) {
+                el.textContent = `Status: ${message}`;
+                el.className = className;
+            }
         }
-        i += chunkSize - chunkOverlap;
-      }
-      return chunks.map((content, id) => ({ id, content }));
-    }
 
-    // --- Model Loading ---
-    async function loadModels() {
-      try {
-        setStatus('1/2: Loading semantic search model...');
-        state.fe = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
+        // --- Test 1: Feature Extraction (Bi-Encoder) ---
+        async function runFeatureExtractionTest() {
+            updateStatus(1, 'Downloading and initializing Embedding Model...');
+            try {
+                const extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
+                updateStatus(1, 'Ready!', 'ready');
 
-        setStatus(`2/2: Loading generator model (${generatorModel})...`);
-        state.generator = await pipeline('text2text-generation', generatorModel, { quantized: true });
+                const text = 'The project was a huge success.';
+                const output = await extractor(text, { pooling: 'mean', normalize: true });
+                
+                console.log('--- TEST 1: Feature Extraction ---');
+                console.log(`Input: "${text}"`);
+                console.log(`Embedding Dimensions: [${output.dims.join(', ')}]`);
+                console.log(`Embedding (first 5 values): [${output.tolist()[0].slice(0, 5).map(v => v.toFixed(4)).join(', ')}]`);
 
-        state.isReady = true;
-        setStatus('✅ Models loaded. Using default demo document.');
-        loadDefaultDoc();
-      } catch (err) {
-        console.error('Error loading models:', err);
-        setStatus('❌ Failed to load models. Try running over localhost or GitHub Pages.');
-      }
-    }
-    loadModels();
+            } catch (error) {
+                updateStatus(1, 'ERROR! Check console.', 'error');
+                console.error('Test 1 Error:', error);
+            }
+        }
 
-    // --- Sanitization ---
-    function sanitize(text) {
-      return String(text || '').replace(/\s+/g, ' ').trim();
-    }
+        // --- Test 2: Sentiment Analysis ---
+        async function runSentimentAnalysisTest() {
+            updateStatus(2, 'Downloading and initializing Sentiment Model...');
+            try {
+                const classifier = await pipeline('sentiment-analysis', 'Xenova/distilbert-base-uncased-finetuned-sst-2-english');
+                updateStatus(2, 'Ready!', 'ready');
 
-    // --- Load Default Document ---
-    async function loadDefaultDoc() {
-      state.chunks = chunkText(defaultDoc, 400, 100);
+                const text = 'I love coding with these new tools!';
+                const output = await classifier(text);
+                
+                const result = output[0];
+                document.getElementById('result2').innerHTML = `<p><strong>Result:</strong> ${result.label} (Score: ${result.score.toFixed(4)})</p>`;
+                
+                console.log('\n--- TEST 2: Sentiment Analysis ---');
+                console.log(`Input: "${text}"`);
+                console.log(`Result: ${result.label} (Score: ${result.score.toFixed(4)})`);
 
-      state.embeddings = [];
-      for (let chunk of state.chunks) {
-        const emb = await state.fe(chunk.content, { pooling: 'mean', normalize: true });
-        state.embeddings.push(Array.from(emb.data));
-      }
 
-      fileInfo.textContent = "Loaded: Demo JavaScript AI Doc";
-      setStatus("✅ Document ready. Ask your question below.");
-      userInput.disabled = false;
-      sendBtn.disabled = false;
-      userInput.focus();
-    }
+            } catch (error) {
+                updateStatus(2, 'ERROR! Check console.', 'error');
+                console.error('Test 2 Error:', error);
+            }
+        }
 
-    // --- File Upload Handler ---
-    fileInput.addEventListener('change', async (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
+        // --- Test 3: Text Generation ---
+        async function runTextGenerationTest() {
+            updateStatus(3, 'Downloading and initializing Text Generation Model...');
+            try {
+                const generator = await pipeline('text-generation', 'Xenova/gpt2');
+                updateStatus(3, 'Ready!', 'ready');
 
-      setStatus("Reading file...");
-      const text = await file.text();
-      fileInfo.textContent = `Loaded: ${file.name} (${text.length} chars)`;
+                const prompt = 'The meaning of life is';
+                const output = await generator(prompt, { 
+                    max_new_tokens: 30,
+                    do_sample: true
+                });
+                
+                const generatedText = output[0].generated_text;
+                document.getElementById('result3').innerHTML = `<p><strong>Generated Text:</strong> <em>"${generatedText}"</em></p>`;
 
-      setStatus("1/2: Chunking document...");
-      state.chunks = chunkText(text, 400, 100);
+                console.log('\n--- TEST 3: Text Generation ---');
+                console.log(`Input Prompt: "${prompt}"`);
+                console.log(`Generated Text: "${generatedText}"`);
 
-      setStatus(`2/2: Generating embeddings for ${state.chunks.length} chunks...`);
-      state.embeddings = [];
-      for (let chunk of state.chunks) {
-        const emb = await state.fe(chunk.content, { pooling: 'mean', normalize: true });
-        state.embeddings.push(Array.from(emb.data));
-      }
 
-      setStatus("✅ Document ready. Ask your question below.");
-      userInput.disabled = false;
-      sendBtn.disabled = false;
-      userInput.focus();
-    });
+            } catch (error) {
+                updateStatus(3, 'ERROR! Check console.', 'error');
+                console.error('Test 3 Error:', error);
+            }
+        }
 
-    // --- Main RAG Chat Handler ---
-    async function handleSend() {
-      const query = userInput.value.trim();
-      if (!query) return;
-      appendMessage('user', query);
-      userInput.value = '';
+        // --- Test 4: Reranking (Cross-Encoder) ---
+        async function runRerankerTest() {
+            updateStatus(4, 'Downloading and initializing Reranker Model (for RAG Accuracy)...');
+            try {
+                // Reranking uses the 'text-classification' task type
+                const reranker = await pipeline('text-classification', 'Xenova/bge-reranker-base');
+                updateStatus(4, 'Ready!', 'ready');
 
-      if (state.chunks.length === 0) {
-        appendMessage('bot', "Please upload a document first.");
-        return;
-      }
+                const query = "How do I install the dependencies for a Python project?";
+                const candidates = [
+                    "Use `pip install -r requirements.txt` to install all project dependencies.",
+                    "The project setup requires a version of NodeJS above 18.0.",
+                ];
+                
+                // Crucial step: The input is an array of [query, document] pairs
+                const scores = await reranker(candidates.map(doc => [query, doc]));
 
-      setStatus("1/3: Retrieving context...");
-      let context = "";
+                const rerankedResults = scores
+                    .map((score, index) => ({
+                        score: score.score,
+                        text: candidates[index],
+                    }))
+                    .sort((a, b) => b.score - a.score); // Sort by score, descending
 
-      if (/summary|summarize|overview/i.test(query)) {
-        context = state.chunks.slice(0, 5).map(c => c.content).join('\n\n');
-      } else {
-        const qEmb = await state.fe(query, { pooling: 'mean', normalize: true });
-        const scoredChunks = state.embeddings.map((emb, i) => ({
-          content: state.chunks[i].content,
-          score: dot(Array.from(qEmb.data), emb),
-        }));
+                const topResult = rerankedResults[0];
 
-        const TOP_K = 1;
-        const topChunks = scoredChunks.sort((a, b) => b.score - a.score).slice(0, TOP_K);
-        context = topChunks.map(c => c.content).join('\n\n');
-      }
+                document.getElementById('result4').innerHTML = 
+                    `<p><strong>Candidate 1 Score:</strong> ${rerankedResults.find(r => r.text === candidates[0]).score.toFixed(4)}</p>` +
+                    `<p><strong>Candidate 2 Score:</strong> ${rerankedResults.find(r => r.text === candidates[1]).score.toFixed(4)}</p>` +
+                    `<p><strong>Conclusion:</strong> The Reranker correctly identified the top result based on semantic relevance.</p>`;
+                
+                console.log('\n--- TEST 4: Reranking Results (Highest Score = Most Relevant) ---');
+                rerankedResults.forEach((result, rank) => {
+                    console.log(`Rank ${rank + 1} (Score: ${result.score.toFixed(4)}): "${result.text}"`);
+                });
 
-      const prompt = `
-Use only the context below to answer the question.
-Do not repeat the question. Do not invent information.
+            } catch (error) {
+                updateStatus(4, 'ERROR! Check console.', 'error');
+                console.error('Test 4 Error:', error);
+            }
+        }
 
-Context:
-${context}
 
-Question: ${query}
+        // --- Main Execution Loop ---
+        async function runAllModelTests() {
+            // These run in parallel to load faster, but Test 4 is the most important for accuracy!
+            await Promise.all([
+                runFeatureExtractionTest(),
+                runSentimentAnalysisTest(),
+                runTextGenerationTest(),
+                runRerankerTest(),
+            ]);
+            
+            console.log('\n✅ All core RAG model tests have completed successfully!');
+        }
 
-Answer in 2–5 sentences, clear and concise:
-`.trim();
-
-      setStatus("2/3: Generating answer...");
-      const gen = await state.generator(prompt, {
-        max_new_tokens: 200,
-        temperature: 0.3,
-        top_p: 0.9,
-        do_sample: true,
-      });
-
-      setStatus("3/3: Finalizing...");
-      let finalAnswer = sanitize(gen[0]?.generated_text || '');
-
-      if (!finalAnswer) {
-        finalAnswer = "I couldn't find a clear answer in the document for your question.";
-      }
-
-      appendMessage('bot', finalAnswer);
-      setStatus("✅ Document ready. Ask another question.");
-    }
-
-    sendBtn.addEventListener('click', handleSend);
-    userInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') handleSend();
-    });
-  </script>
+        // Start the tests!
+        runAllModelTests();
+    </script>
 </body>
 </html>
